@@ -1,8 +1,34 @@
 #!/usr/bin/env python3
 #
-# author: Vladimir F de Sousa - vfrancadesou@vmware.com
-# date: February 2021
-#
+# Author: vfrancadesou@vmware.com
+
+# Very simple script that leverages VMware SD-WAN Orchestrator API and AWS SDK for python.
+# It provisions a new profile and a new virtual vmware sd-wan edge (VCE) in the VMware SD-WAN #Orchestrator (VCO)
+
+# It will change the edge device settings shown below to be compatible with the cloudformation  template
+# :vlan1 ip, ge2 as routed with public auto overlay, and ge3 routed with no overlay)
+
+# After provisioning the VCE, the script builds a green field cf template, populates its parameters
+# and launch a AWS cloudformation stack.
+
+# Original template can be found here:
+# https://vdc-download.vmware.com/sampleExchange/v1/downloads/6444
+# author: David Wight
+
+# Pre-requisites:
+
+# VMware SD-WAN:
+# Orchestrator Target
+# Enterprise admin account
+# Enterprise user and user VCO API token
+# AWS:
+# Amazon Web Services (AWS) CLI credentials
+# Python Modules:
+# os, sys, requests, json , boto3 (AWS SDK for Python)
+
+# more information about what is being built can be found here:
+# https://docs.vmware.com/en/VMware-SD-WAN/4.2/sd-wan-aws-virtual-edge-deployment-guide/GUID-805915BF-C3D1-4B6D-A62F-859314A64896.html
+
 # Not to be considered as best practices in using VMware VCO API
 # Meant to be used in Lab environments - Please test it and use at your own risk
 #
@@ -12,39 +38,25 @@
 #
 # Compatible with api v1 of the vmware sd-wan vco api
 # using tokens to authenticate
-#
-# Very simple script that provision a new Profile, a new virtual vmware sd-wan edge to be used with a AWS cloudformation template
-# It will change the edge device settings to be compatible with the cloud formation template
-# (vlan1 ip, ge2 as routed with public auto overlay, and ge3 routed with no overlay)
-#
-# The script buildS a green field cf template and populates its parameters
-#
-# Original template can be found here:
-# https://vdc-download.vmware.com/sampleExchange/v1/downloads/6444
-# author: David Wight
-#
-# Install modules 'python3 -m pip install requests boto3 '
-#
-# About how to configure AWS credentials:
-# https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_use-resources.html
 
 import os
 import sys
 import requests
 import json
 import random
+import argparse
 import boto3
+from copy import deepcopy
 
 ######### VELO VARIABLES AND FUNCTIONS
 
 ########## VCO info and credentials
 # Prefer to use OS environments to hold token variable
-token = "Token %s" %(os.environ['VCO_TOKEN'])
+token = os.environ['VCO_TOKEN']
+VCO_FQDN=os.environ['VCO_HOSTNAME']
+vco_url = 'https://' + os.environ['VCO_HOSTNAME'] + '/portal/rest/'
 headers = {"Content-Type": "application/json", "Authorization": token}
-VCO_FQDN='vco58-usvi1.velocloud.net'
-vco_url = 'https://'+ "vco58-usvi1.velocloud.net"+'/portal/rest/'
-#vco_url = 'https://' + os.environ['VCO_FQDN'] + '/portal/'
-ProfileName='AWS-PROFILE'
+ProfileName='AWS HUB Profile'
 EdgeName='AWS-VCE-'+str(random.randint(1,10000))
 EdgeContactName='Vladimir'
 EdgeContactEmail='vfrancadesou-aws@vmware.com'
@@ -75,25 +87,22 @@ site={
     }
 
 ###
-#### PRE BUILT CONFIG with new VLAN 1 IP, GE2 as routed with auto-overlay, and GE3 routed with no overlay
-newdata={'data':{'lan':{'visibility':{'override':False,'mode':'MAC'},'networks':[{'vlanId':1,'name':'Corporate','segmentId':0,'disabled':False,'advertise':False,'pingResponse':False,'cost':10,'cidrIp':'127.0.0.10','cidrPrefix':30,'netmask':'255.255.255.252','dhcp':{'enabled':False,'leaseTimeSeconds':86400,'options':[],'override':True},'staticReserved':10,'baseDhcpAddr':0,'numDhcpAddr':0,'interfaces':['GE1'],'multicast':{'igmp':{'enabled':False,'type':'IGMP_V2'},'pim':{'enabled':False,'type':'PIM_SM'},'pimHelloTimerSeconds':None,'pimKeepAliveTimerSeconds':None,'pimPruneIntervalSeconds':None,'igmpHostQueryIntervalSeconds':None,'igmpMaxQueryResponse':None},'ospf':{'enabled':False,'area':'','passiveInterface':True},'override':True,'fixedIp':[]}]},'segments':[{'segment':{'segmentId':0,'name':'Global Segment','type':'REGULAR'},'routes':{'icmpProbes':[],'icmpResponders':[],'static':[]}}],'vnfs':{'hasVnfs':True,'edge':{'ref':'deviceSettings:vnfs:edge','logicalId':'149082e7-c13d-4a16-9233-c0aa7b6686a5'}},'ha':{'enabled':False,'interface':'GE1'},'routedInterfaces':[{'name':'GE2','disabled':False,'addressing':{'type':'DHCP','cidrPrefix':None,'cidrIp':None,'netmask':None,'gateway':None},'wanOverlay':'AUTO_DISCOVERED','encryptOverlay':True,'radiusAuthentication':{'enabled':False,'macBypass':[]},'advertise':False,'pingResponse':True,'natDirect':True,'trusted':False,'rpf':'SPECIFIC','ospf':{'enabled':False,'area':'','authentication':False,'authId':0,'authPassphrase':'','helloTimer':10,'mode':'BCAST','deadTimer':40,'enableBfd':False,'md5Authentication':False,'cost':1,'MTU':1380,'passive':False,'inboundRouteLearning':{'defaultAction':'LEARN','filters':[]},'outboundRouteAdvertisement':{'defaultAction':'IGNORE','filters':[]}},'multicast':{'igmp':{'enabled':False,'type':'IGMP_V2'},'pim':{'enabled':False,'type':'PIM_SM'},'pimHelloTimerSeconds':None,'pimKeepAliveTimerSeconds':None,'pimPruneIntervalSeconds':None,'igmpHostQueryIntervalSeconds':None,'igmpMaxQueryResponse':None},'vlanId':None,'underlayAccounting':True,'segmentId':-1,'l2':{'autonegotiation':True,'speed':'100M','duplex':'FULL','MTU':1500},'override':True},{'name':'GE3','disabled':False,'wanOverlay':'DISABLED','natDirect':True,'pingResponse':True,'encryptOverlay':True,'ospf':{'enabled':False,'area':0,'authentication':False,'authId':0,'authPassphrase':'','helloTimer':10,'deadTimer':40,'md5Authentication':False,'cost':1,'MTU':1380,'passive':False,'inboundRouteLearning':{'defaultAction':'LEARN','filters':[]},'outboundRouteAdvertisement':{'defaultAction':'IGNORE','filters':[]},'mode':'BCAST'},'vlanId':None,'segmentId':0,'l2':{'autonegotiation':True,'speed':'100M','duplex':'FULL','MTU':1500},'underlayAccounting':True,'radiusAuthentication':{'enabled':False,'macBypass':[]},'multicast':{'igmp':{'enabled':False,'type':'IGMP_V2'},'pim':{'enabled':False,'type':'PIM_SM'},'pimHelloTimerSeconds':None,'pimKeepAliveTimerSeconds':None,'pimPruneIntervalSeconds':None,'igmpHostQueryIntervalSeconds':None,'igmpMaxQueryResponse':None},'addressing':{'type':'DHCP','cidrPrefix':None,'cidrIp':None,'netmask':None,'gateway':None},'override':True,'rpf':'SPECIFIC'},{'name':'GE4','disabled':False,'wanOverlay':'AUTO_DISCOVERED','natDirect':True,'pingResponse':True,'encryptOverlay':True,'ospf':{'enabled':False,'area':0,'authentication':False,'authId':0,'authPassphrase':'','helloTimer':10,'deadTimer':40,'md5Authentication':False,'cost':1,'MTU':1380,'passive':False,'inboundRouteLearning':{'defaultAction':'LEARN','filters':[]},'outboundRouteAdvertisement':{'defaultAction':'IGNORE','filters':[]},'mode':'BCAST'},'vlanId':None,'segmentId':-1,'l2':{'autonegotiation':True,'speed':'100M','duplex':'FULL','MTU':1500},'underlayAccounting':True,'radiusAuthentication':{'enabled':False,'macBypass':[]},'multicast':{'igmp':{'enabled':False,'type':'IGMP_V2'},'pim':{'enabled':False,'type':'PIM_SM'},'pimHelloTimerSeconds':None,'pimKeepAliveTimerSeconds':None,'pimPruneIntervalSeconds':None,'igmpHostQueryIntervalSeconds':None,'igmpMaxQueryResponse':None},'addressing':{'type':'DHCP','cidrPrefix':None,'cidrIp':None,'netmask':None,'gateway':None}},{'name':'GE5','disabled':False,'wanOverlay':'AUTO_DISCOVERED','natDirect':True,'pingResponse':True,'encryptOverlay':True,'ospf':{'enabled':False,'area':0,'authentication':False,'authId':0,'authPassphrase':'','helloTimer':10,'deadTimer':40,'md5Authentication':False,'cost':1,'MTU':1380,'passive':False,'inboundRouteLearning':{'defaultAction':'LEARN','filters':[]},'outboundRouteAdvertisement':{'defaultAction':'IGNORE','filters':[]},'mode':'BCAST'},'vlanId':None,'segmentId':-1,'l2':{'autonegotiation':True,'speed':'100M','duplex':'FULL','MTU':1500},'underlayAccounting':True,'radiusAuthentication':{'enabled':False,'macBypass':[]},'multicast':{'igmp':{'enabled':False,'type':'IGMP_V2'},'pim':{'enabled':False,'type':'PIM_SM'},'pimHelloTimerSeconds':None,'pimKeepAliveTimerSeconds':None,'pimPruneIntervalSeconds':None,'igmpHostQueryIntervalSeconds':None,'igmpMaxQueryResponse':None},'addressing':{'type':'DHCP','cidrPrefix':None,'cidrIp':None,'netmask':None,'gateway':None}},{'name':'GE6','disabled':False,'wanOverlay':'AUTO_DISCOVERED','natDirect':True,'pingResponse':True,'encryptOverlay':True,'ospf':{'enabled':False,'area':0,'authentication':False,'authId':0,'authPassphrase':'','helloTimer':10,'deadTimer':40,'md5Authentication':False,'cost':1,'MTU':1380,'passive':False,'inboundRouteLearning':{'defaultAction':'LEARN','filters':[]},'outboundRouteAdvertisement':{'defaultAction':'IGNORE','filters':[]},'mode':'BCAST'},'vlanId':None,'segmentId':-1,'l2':{'autonegotiation':True,'speed':'100M','duplex':'FULL','MTU':1500},'underlayAccounting':True,'radiusAuthentication':{'enabled':False,'macBypass':[]},'multicast':{'igmp':{'enabled':False,'type':'IGMP_V2'},'pim':{'enabled':False,'type':'PIM_SM'},'pimHelloTimerSeconds':None,'pimKeepAliveTimerSeconds':None,'pimPruneIntervalSeconds':None,'igmpHostQueryIntervalSeconds':None,'igmpMaxQueryResponse':None},'addressing':{'type':'DHCP','cidrPrefix':None,'cidrIp':None,'netmask':None,'gateway':None}},{'name':'GE7','disabled':False,'wanOverlay':'AUTO_DISCOVERED','natDirect':True,'pingResponse':True,'encryptOverlay':True,'ospf':{'enabled':False,'area':0,'authentication':False,'authId':0,'authPassphrase':'','helloTimer':10,'deadTimer':40,'md5Authentication':False,'cost':1,'MTU':1380,'passive':False,'inboundRouteLearning':{'defaultAction':'LEARN','filters':[]},'outboundRouteAdvertisement':{'defaultAction':'IGNORE','filters':[]},'mode':'BCAST'},'vlanId':None,'segmentId':-1,'l2':{'autonegotiation':True,'speed':'100M','duplex':'FULL','MTU':1500},'underlayAccounting':True,'radiusAuthentication':{'enabled':False,'macBypass':[]},'multicast':{'igmp':{'enabled':False,'type':'IGMP_V2'},'pim':{'enabled':False,'type':'PIM_SM'},'pimHelloTimerSeconds':None,'pimKeepAliveTimerSeconds':None,'pimPruneIntervalSeconds':None,'igmpHostQueryIntervalSeconds':None,'igmpMaxQueryResponse':None},'addressing':{'type':'DHCP','cidrPrefix':None,'cidrIp':None,'netmask':None,'gateway':None}},{'name':'GE8','disabled':False,'wanOverlay':'AUTO_DISCOVERED','natDirect':True,'pingResponse':True,'encryptOverlay':True,'ospf':{'enabled':False,'area':0,'authentication':False,'authId':0,'authPassphrase':'','helloTimer':10,'deadTimer':40,'md5Authentication':False,'cost':1,'MTU':1380,'passive':False,'inboundRouteLearning':{'defaultAction':'LEARN','filters':[]},'outboundRouteAdvertisement':{'defaultAction':'IGNORE','filters':[]},'mode':'BCAST'},'vlanId':None,'segmentId':-1,'l2':{'autonegotiation':True,'speed':'100M','duplex':'FULL','MTU':1500},'underlayAccounting':True,'radiusAuthentication':{'enabled':False,'macBypass':[]},'multicast':{'igmp':{'enabled':False,'type':'IGMP_V2'},'pim':{'enabled':False,'type':'PIM_SM'},'pimHelloTimerSeconds':None,'pimKeepAliveTimerSeconds':None,'pimPruneIntervalSeconds':None,'igmpHostQueryIntervalSeconds':None,'igmpMaxQueryResponse':None},'addressing':{'type':'DHCP','cidrPrefix':None,'cidrIp':None,'netmask':None,'gateway':None}}]}}
-
 ######## VCO API methods
 get_enterprise = vco_url + 'enterprise/getEnterprise'
 get_edgelist = vco_url+'enterprise/getEnterpriseEdgeList'
 get_edgeconfig = vco_url + 'edge/getEdgeConfigurationStack'
 update_edgeconfig = vco_url+'configuration/updateConfigurationModule'
 edge_prov = vco_url+'edge/edgeProvision'
-get_profiles =vco_url + 'enterprise/getEnterpriseConfigurations'
+get_profiles =vco_url + 'enterprise/getEnterpriseConfigurationsPolicies'
 create_profile = vco_url+'configuration/cloneEnterpriseTemplate'
 
 ######## AWS variable and inputs
 #aws ec2 keypair name
-KeyName='VELO-EC2-AWS-KEY'
+KeyName='AWS-KEY-CALI' ### must already exist
 BucketName='vm-velocf'
 File2Upload='new-velo-cf.json'
 StackName='VELO-STACK'+str(random.randint(1,1000))
-CfRegion = 'us-east-1'
+CfRegion = 'us-west-1' ### if CFRegion is different make sure to change region in velocf below as well
 ### To run or not to run the AWS stack
 runaws=True
 
@@ -133,7 +142,7 @@ velocf={
     "EC2InstanceType": {
       "Description": "Throughput and number of NICs dictate instance type",
       "Type": "String",
-      "Default": "c4.large",
+      "Default": "c4.xlarge",
       "AllowedValues": [
         "c4.large", "c4.xlarge", "c4.2xlarge", "c4.4xlarge",
         "c5.large", "c5.xlarge", "c5.2xlarge", "c5.4xlarge"
@@ -147,7 +156,7 @@ velocf={
     "AvailabilityZone" : {
       "Description" : "Availability zone to deploy in",
       "Type" : "String",
-      "Default" : "us-east-1a"
+      "Default" : "us-west-1b" ### CHANGE AS NEEDED
     },
     "VeloCloudEdgeName" : {
       "Description" : "Name of Edge to be deployed",
@@ -169,22 +178,22 @@ velocf={
    "VCO" : {
      "Description" : "Orchestrator IP address or hostname (fqdn)",
      "Type" : "String",
-     "Default" : "vco12-usvi1.velocloud.net"
+     "Default" : "vco58-usvi1.velocloud.net"
    },
    "VpcCidrBlockValue" : {
      "Description" : "CIDR block for the VPC",
      "Type" : "String",
-     "Default" : "10.0.0.0/16"
+     "Default" : "10.6.0.0/16"
    },
    "PrivateCidrBlockValue" : {
      "Description" : "CIDR block for the LAN side of the Edge",
      "Type" : "String",
-     "Default" : "10.0.1.0/24"
+     "Default" : "10.6.1.0/24"
    },
    "PublicCidrBlockValue" : {
      "Description" : "CIDR block for the WAN side of the Edge",
      "Type" : "String",
-     "Default" : "10.0.0.0/24"
+     "Default" : "10.6.0.0/24"
    },
    "VeloCloudKeyPairName" : {
      "Description" : "Public/Private Key Name of Edge to be deployed",
@@ -397,7 +406,7 @@ velocf={
    "VelocloudLANSecurityGroup": {
      "Type": "AWS::EC2::SecurityGroup",
      "Properties": {
-       "GroupDescription": "LAN Facing Security Group - WARNING: Default is Allow Only ICMP, adjust accordingly for other traffic",
+       "GroupDescription": "LAN Facing Security Group - WARNING: Default is Allow ALL, adjust accordingly your security needs",
        "VpcId": { "Ref": "VelocloudVPC" },
        "Tags": [ { "Key": "Name", "Value": { "Fn::Join": [ "-", [ { "Ref" : "ResourcePrefix" }, "LAN-SG"] ] } } ]
      }
@@ -406,31 +415,29 @@ velocf={
      "Type": "AWS::EC2::SecurityGroupIngress",
      "Properties": {
        "GroupId": { "Ref": "VelocloudLANSecurityGroup" },
-       "IpProtocol": "icmp",
+       "IpProtocol": "-1",
        "FromPort": "-1",
        "ToPort": "-1",
        "CidrIp": "0.0.0.0/0"
      }
    }
  },
- "Description": "VMware SD-WAN by VeloCloud CloudFormation Template (2021)"
+ "Description": "VMware SD-WAN by VeloCloud CloudFormation Template (2021) - modified by vfrancadesou@vmware.com"
 }
 
 
 ########
-
-
 ######## VCO FUNCTIONS
-
-
-########
+#######
 
 #### RETRIEVE ENTERPRISE ID for this user
 def find_velo_enterpriseId():
 	#Fetch enterprise id convert to JSON
 	eid=0
 	try:
-	   enterprise = requests.post(get_enterprise, headers=headers, data='')
+         #print(headers)
+         enterprise = requests.post(get_enterprise, headers=headers, data='')
+
 	except Exception as e:
 	   print('Error while retrivieng Enterprise')
 	   print(e)
@@ -443,29 +450,29 @@ def find_velo_enterpriseId():
 #### CREATE NEW VMWARE SD-WAN CONFIGURATION PROFILE
 
 def create_velo_profile(eid,ProfileName):
-	### Confirm existing profile names, if "AWS-PROFILE" not found, create a new profile
-	params = {'enterpriseId': eid	}
-	try:
-	   profile = requests.post(get_profiles, headers=headers, data=json.dumps(params))
-	except Exception as e:
+### Confirm existing profile names, if "AWS-PROFILE" not found, create a new profile
+ params = {	}
+ try:
+         profile = requests.post(get_profiles, headers=headers, data=json.dumps(params))
+ except Exception as e:
 	   print('error getting profiles')
 	   print(e)
 	   sys.exit()
-	prof_dict = profile.json()
-
-	length = len(prof_dict)
-	z=0
-	ProfId=0
-	notfound=True
-	pid=0
-	while z < length:
-	    if(ProfileName==prof_dict[z]['name']):
-				   pid = prof_dict[z]['id']
-				   print ('Profile named '+ProfileName+' already found on VCO '+VCO_FQDN+' with Profile id: '+str(pid))
-				   return pid
-				   notfound=False
-	    z+=1
-	if(notfound):
+ prof_dict = profile.json()
+ #print(prof_dict)
+ length = len(prof_dict)
+ z=0
+ ProfId=0
+ notfound=True
+ pid=0
+ while z < length:
+        if(ProfileName==prof_dict[z]['name']):
+                 pid = prof_dict[z]['id']
+                 print ('Profile named '+ProfileName+' already found on VCO '+VCO_FQDN+' with Profile id: '+str(pid))
+                 notfound=False
+                 return pid
+        z+=1
+ if(notfound):
 		#Provision new Profile and grab its id
 		 params = {"id" : eid,"name":ProfileName}
 		 print('Profile not found, creating new one')
@@ -494,33 +501,61 @@ def provision_velo_edge(eid,pid,EdgeName,site):
 	     print(e)
 	     sys.exit()
 
-##############################   /////   #######################
+def change_edge_config(eid,edid):
+    ### Grab Edge Device Settings
+    params = {'edgeId': edid}
+    respj = requests.post(get_edgeconfig, headers=headers, data=json.dumps(params))
+    resp=respj.json()
+    edgeSpecificProfile = dict(resp[0])
+    edgeSpecificProfileDeviceSettings = [m for m in edgeSpecificProfile['modules'] if m['name'] == 'deviceSettings'][0]
+    edgeSpecificProfileDeviceSettingsData = edgeSpecificProfileDeviceSettings['data']
+    moduleId = edgeSpecificProfileDeviceSettings['id']
+    ### Adding an IP on Vlan 1
+    edgeSpecificProfileDeviceSettingsData['lan']['networks'][0]['cidrIp'] = '127.0.0.10'
+    edgeSpecificProfileDeviceSettingsData['lan']['networks'][0]['advertise'] = False
+    edgeSpecificProfileDeviceSettingsData['lan']['networks'][0]['cidrPrefix'] = '30'
+    edgeSpecificProfileDeviceSettingsData['lan']['networks'][0]['netmask'] = '255.255.255.252'
+    edgeSpecificProfileDeviceSettingsData['lan']['networks'][0]['dhcp']['enabled'] = False
 
+    # Changing existing routed GE3 configuration
+    routedInterfaces = edgeSpecificProfileDeviceSettingsData['routedInterfaces']
+    for iface in routedInterfaces:
+        if iface['name'] == 'GE3':
+            iface['override'] = True
+            iface['advertise'] = True
+            iface['natDirect'] = False
+            iface['wanOverlay'] = 'DISABLED'
+    interface={"name":"GE"}
+    routedInterfaces.insert(0,interface)
+    routedInterfaces.insert(1,interface)
+    routedInterfaces[0]=deepcopy(routedInterfaces[2])
+    routedInterfaces[1]=deepcopy(routedInterfaces[2])
+    routedInterfaces[0]['name'] = 'GE1'
+    routedInterfaces[1]['name'] = 'GE2'
+    for iface in routedInterfaces:
+        if iface['name'] == 'GE2':
+            iface['override'] = True
+            iface['advertise'] = False
+            iface['natDirect'] = True
+            iface['wanOverlay'] = 'AUTO_DISCOVERED'
+
+    edgeSpecificProfileDeviceSettingsData['routedInterfaces']=deepcopy(routedInterfaces)
+    testResponse = {}
+    testResponse['data'] = edgeSpecificProfileDeviceSettingsData
+    ########### Change VCE device settings so it matches AWS cloudformation
+    params3 = {
+    "id" : moduleId,
+    "returnData" : 'true',
+    "_update":  testResponse,
+    "name":"deviceSettings"}
+    resp = requests.post(update_edgeconfig, headers=headers, data=(json.dumps(params3)))
+    respo_j=resp.json()
+    print('Devices Settings updated - these are needed for AWS deployment')
+
+##############################   /////   #######################
 ####                          AWS FUNCTIONS
-
-
 ##############################   /////   #######################
-
-def create_ec2_keypair(keyname):
-    #### Create new EC2 keypair, if one does not already exist
-    print('Connecting to AWS and checking for existing EC2 keypair')
-    ec2 = boto3.client('ec2')
-    keys_dict=ec2.describe_key_pairs()
-    found=False
-    t=0
-    for keypair in keys_dict['KeyPairs']:
-            if (keys_dict['KeyPairs'][t]['KeyName']==keyname):
-                    print('Existing Keypair '+keyname+' found!')
-                    found=True
-            t+=1
-    if not found:
-    	print('Creating new EC2 Keypair named '+keyname)
-    	response = ec2.create_key_pair(KeyName=keyname)
-
-
-
-############## Create S3 bucket and upload file to it
-
+############# Create S3 bucket and upload file to it
 def upload_file_to_s3(bucketname,file2upload):
 	# check if bucket alread exists if not create one and
 	# upload new cloud formation template to S3 bucket named 'velocf'
@@ -541,17 +576,14 @@ def upload_file_to_s3(bucketname,file2upload):
 	s3FileUrl = "https://%s.s3.amazonaws.com/%s" % (bucket_name, upload_file)
 	print('File URL = '+s3FileUrl)
 	return s3FileUrl
-
+############# Deploy CF Stack
 def deploy_aws_cf_stack(stackname,awsregion,s3fileurl):
 	cf_template_url=s3fileurl
-
 	cf_region=awsregion
 	#-- Connect to AWS region specified in parameters file
 	print("Connecting to region: " + cf_region)
 	lo_cf_client = boto3.client('cloudformation', cf_region)
-
 	cf_stack_name = stackname
-
 	#-- Check if this stack name already exists
 	lo_stack_list = lo_cf_client.describe_stacks()["Stacks"]
 	ll_stack_exists = False
@@ -559,83 +591,67 @@ def deploy_aws_cf_stack(stackname,awsregion,s3fileurl):
 		if cf_stack_name == lo_stack["StackName"]:
 			print("Stack " + cf_stack_name + " already exists.")
 			ll_stack_exists = True
-
 	#-- If  stack  exists, delete it first
 	if ll_stack_exists:
 		print(" Delete existing Stack  " + cf_stack_name)
 		lo_cf_client.delete_stack(StackName=cf_stack_name)
-
 	la_create_stack_parameters = []
-
 	#-- Call CloudFormation API and create the stack
 	print(" ")
 	print("Creating Stack : " + cf_stack_name)
 	cf_cur_status = ""
-
 	apiresult = lo_cf_client.create_stack(StackName=cf_stack_name, DisableRollback=False, TemplateURL=cf_template_url, Parameters=la_create_stack_parameters, Capabilities=["CAPABILITY_IAM"])
 	print("API result: ")
-
 	print(apiresult)
 
 ######################### Main Program #####################
-
 #### MAIN BODY
-
 ######################### Main Program #####################
+######################### Main Program #####################
+#### MAIN BODY
+######################### Main Program #####################
+def main():
+        parser = argparse.ArgumentParser()
+        parser.add_argument("-a", "--aws", action='store_true', help="Deploy CF stack in AWS",required=False)
+#parser.add_argument('EdgeSource')
+#parser.add_argument('EdgeDest')
+#parser.add_argument('Map')
+#print(f'Source 5x0 {args.EdgeSource} and Target 6x0 {args.EdgeDest} with Interface Mapping {args.EdgeSource}')
 
-eid = find_velo_enterpriseId()
-pid = create_velo_profile(eid,ProfileName)
-new_edge_l = provision_velo_edge(eid,pid,EdgeName,site)
-edid=new_edge_l[0]
-activationkey=new_edge_l[1]
+        args = parser.parse_args()
+        eid = find_velo_enterpriseId()
+        pid = create_velo_profile(eid,ProfileName)
+        new_edge_l = provision_velo_edge(eid,pid,EdgeName,site)
+        edid=new_edge_l[0]
+        activationkey=new_edge_l[1]
+        ### Change Edge Configuration so it can be used in AWS
+        change_edge_config(eid,edid)
+        #Populate new cloudformation file with all parameters needed
+        # 2 options , read from file
+        # Read template from file
+        # with open(cf_file) as json_file:
+        	#data = json.load(json_file)
+        # or
+        # Use template pre-inserted inside this python code
+        data = velocf
+        data['Parameters']['ActivationKey']['Default'] = activationkey
+        data['Parameters']['VeloCloudKeyPairName']['Default']=KeyName
+        data['Parameters']['VCO']['Default']=VCO_FQDN
+        data['Parameters']['VeloCloudEdgeName']['Default']=EdgeName
 
-### Grab Edge Device Settings
-params2 = {'edgeId': edid}
-resp = requests.post(get_edgeconfig, headers=headers, data=json.dumps(params2))
-resp_j = resp.json()
+        # Dumping the result in a json file so it can also be used manually or uploaded to AWS S3
+        with open('new-velo-cf.json', 'w') as outfile:
+        	outfile.write(json.dumps(data))
 
-for module in resp_j[0]['modules']:
-    if module['name'] == 'deviceSettings':
-        deviceSettingsId = module['id']
+        ################ ////////////////// ##############################################
+        # AWS PART:
+        ################ ////////////////// ##############################################
+        if(args.aws):
+        	# Upload the pre-populate cf template to a S3 bucket
+        	# Create the bucket if it does not already exists
+        	s3url=upload_file_to_s3(BucketName,File2Upload)
+        	# Deploy a new CloudFormation stack in AWS
+        	deploy_aws_cf_stack(StackName,CfRegion,s3url)
 
-########### Change VCE device settings so it matches AWS cloudformation
-params3 = {
-"id" : deviceSettingsId,
-"returnData" : 'true',
-"_update":  newdata,
-"name":"deviceSettings"}
-resp = requests.post(update_edgeconfig, headers=headers, data=(json.dumps(params3)))
-respo_j=resp.json()
-print('Devices Settings updated')
-
-#Populate new cloudformation file with all parameters needed
-# 2 options , read from file
-# Read template from file
-# with open(cf_file) as json_file:
-	#data = json.load(json_file)
-# or
-# Use template pre-inserted inside this python code
-data = velocf
-data['Parameters']['ActivationKey']['Default'] = activationkey
-data['Parameters']['VeloCloudKeyPairName']['Default']=KeyName
-data['Parameters']['VCO']['Default']=VCO_FQDN
-data['Parameters']['VeloCloudEdgeName']['Default']=EdgeName
-
-# Dumping the result in a json file so it can also be used manually or uploaded to AWS S3
-with open('new-velo-cf.json', 'w') as outfile:
-	outfile.write(json.dumps(data))
-
-################ ////////////////// ##############################################
-
-# AWS PART:
-
-################ ////////////////// ##############################################
-
-if(runaws):
-	# Check if EC2 keypair exists, if not create a new one
-	create_ec2_keypair(KeyName)
-	# Upload the pre-populate cf template to a S3 bucket
-	# Create the bucket if it does not already exists
-	s3url=upload_file_to_s3(BucketName,File2Upload)
-	# Deploy a new CloudFormation stack in AWS
-	deploy_aws_cf_stack(StackName,CfRegion,s3url)
+if __name__ == "__main__":
+    main()
