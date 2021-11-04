@@ -52,14 +52,30 @@ from copy import deepcopy
 
 ########## VCO info and credentials
 # Prefer to use OS environments to hold token variable
-token = os.environ['VCO_TOKEN']
+token = "Token %s" %(os.environ['VCO_TOKEN'])
 VCO_FQDN=os.environ['VCO_HOSTNAME']
-vco_url = 'https://' + os.environ['VCO_HOSTNAME'] + '/portal/rest/'
+vco_url = 'https://' + VCO_FQDN + '/portal/rest/'
 headers = {"Content-Type": "application/json", "Authorization": token}
-ProfileName='AWS HUB Profile'
+ProfileName='AWS-PROFILE'
 EdgeName='AWS-VCE-'+str(random.randint(1,10000))
 EdgeContactName='Vladimir'
 EdgeContactEmail='vfrancadesou-aws@vmware.com'
+
+######## AWS variable and inputs
+#aws ec2 keypair name
+#KeyName='AWS-EC2-FRA' ### must already exist
+KeyName='AWS-VIRG-KEY'
+BucketName='vm-velocf'
+File2Upload='new-velo-cf.json'
+StackName='VELO-STACK'+str(random.randint(1,1000))
+CfRegion = 'us-east-1' ### if CFRegion is different make sure to change region in velocf below as well
+region = "us-east-1b"
+
+#! make sure to watch to not duplicate VPC Subnets
+
+### To run or not to run the AWS stack
+runaws=True
+
 
 ### EDGE contact information
 site={
@@ -96,15 +112,7 @@ edge_prov = vco_url+'edge/edgeProvision'
 get_profiles =vco_url + 'enterprise/getEnterpriseConfigurationsPolicies'
 create_profile = vco_url+'configuration/cloneEnterpriseTemplate'
 
-######## AWS variable and inputs
-#aws ec2 keypair name
-KeyName='AWS-KEY-CALI' ### must already exist
-BucketName='vm-velocf'
-File2Upload='new-velo-cf.json'
-StackName='VELO-STACK'+str(random.randint(1,1000))
-CfRegion = 'us-west-1' ### if CFRegion is different make sure to change region in velocf below as well
-### To run or not to run the AWS stack
-runaws=True
+
 
 ### modified AWS Cloud Formation GREEN  FIELD TEMPLATE
 velocf={
@@ -156,7 +164,7 @@ velocf={
     "AvailabilityZone" : {
       "Description" : "Availability zone to deploy in",
       "Type" : "String",
-      "Default" : "us-west-1b" ### CHANGE AS NEEDED
+      "Default" : region ### CHANGE AS NEEDED
     },
     "VeloCloudEdgeName" : {
       "Description" : "Name of Edge to be deployed",
@@ -183,17 +191,17 @@ velocf={
    "VpcCidrBlockValue" : {
      "Description" : "CIDR block for the VPC",
      "Type" : "String",
-     "Default" : "10.6.0.0/16"
+     "Default" : "10.1.0.0/16"
    },
    "PrivateCidrBlockValue" : {
      "Description" : "CIDR block for the LAN side of the Edge",
      "Type" : "String",
-     "Default" : "10.6.1.0/24"
+     "Default" : "10.1.1.0/24"
    },
    "PublicCidrBlockValue" : {
      "Description" : "CIDR block for the WAN side of the Edge",
      "Type" : "String",
-     "Default" : "10.6.0.0/24"
+     "Default" : "10.1.0.0/24"
    },
    "VeloCloudKeyPairName" : {
      "Description" : "Public/Private Key Name of Edge to be deployed",
@@ -450,35 +458,30 @@ def find_velo_enterpriseId():
 #### CREATE NEW VMWARE SD-WAN CONFIGURATION PROFILE
 
 def create_velo_profile(eid,ProfileName):
+ pid=0
 ### Confirm existing profile names, if "AWS-PROFILE" not found, create a new profile
  params = {	}
  try:
          profile = requests.post(get_profiles, headers=headers, data=json.dumps(params))
+         #print(profile.json())
  except Exception as e:
 	   print('error getting profiles')
 	   print(e)
 	   sys.exit()
  prof_dict = profile.json()
- #print(prof_dict)
- length = len(prof_dict)
- z=0
- ProfId=0
- notfound=True
- pid=0
- while z < length:
-        if(ProfileName==prof_dict[z]['name']):
-                 pid = prof_dict[z]['id']
-                 print ('Profile named '+ProfileName+' already found on VCO '+VCO_FQDN+' with Profile id: '+str(pid))
-                 notfound=False
-                 return pid
-        z+=1
- if(notfound):
+ for p in prof_dict:
+    if p['name'].lower() == ProfileName.lower():
+     print('found')
+     print ('Profile named '+ProfileName+' already found on VCO '+VCO_FQDN+' with Profile id: '+str(p['id']))
+     return p['id']
+
+ if(pid==0):
 		#Provision new Profile and grab its id
 		 params = {"id" : eid,"name":ProfileName}
 		 print('Profile not found, creating new one')
 		 profile_resp = requests.post(create_profile, headers=headers, data=json.dumps(params))
-		 #print(profile_resp.json())
-		 prof_dict = profile_resp.json()
+		 prof_dict=profile_resp.json()
+
 		 pid = prof_dict['id']
 		 print('New Profile named '+ProfileName+' created with Id = %d'%(pid))
 		 return pid
@@ -652,6 +655,8 @@ def main():
         	s3url=upload_file_to_s3(BucketName,File2Upload)
         	# Deploy a new CloudFormation stack in AWS
         	deploy_aws_cf_stack(StackName,CfRegion,s3url)
+        else:
+            print("edge not provisioned in aws, use option -a if you want to deploy it")
 
 if __name__ == "__main__":
     main()
